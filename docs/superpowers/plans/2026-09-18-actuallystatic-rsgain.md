@@ -557,6 +557,9 @@ ENTRYPOINT ["/rsgain"]
 
 - [ ] **Step 2: Append the publish job to `.github/workflows/build.yml`**
 
+(Shipped version below, including the fail-closed re-publish guard and the
+push-then-smoke-test-then-promote ordering added during review.)
+
 ```yaml
   publish:
     name: Publish release and image
@@ -567,6 +570,30 @@ ENTRYPOINT ["/rsgain"]
     steps:
       - name: Checkout this repo
         uses: actions/checkout@v4
+
+      - name: Guard against re-publishing an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: ${{ needs.check.outputs.ref }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Same three-branch shape as the check job's own-release lookup:
+          # found / genuinely-not-found / anything-else-fails-loudly. A bare
+          # `if ... ; then block ; fi` would fail OPEN on a transient API
+          # error (5xx, rate limit, auth hiccup) -- treating "couldn't tell"
+          # the same as "confirmed absent" is exactly wrong for a guard whose
+          # job is to stop an overwrite.
+          if REL=$(gh release view "$REF" --repo "$REPO" --json tagName -q .tagName 2>&1); then
+            echo "::error::Release $REF already exists on $REPO. Manual dispatch of an already-released ref is not supported: rebuilding now would push fresh (not bit-identical) image content over the published :$VERSION and :latest tags without any release changing to show for it. If you need to redo this version, remove the existing release and image tag first through your own deliberate action -- this workflow will not overwrite them for you. To publish a new version, dispatch with a ref that has no release yet, or leave ref blank to build the newest untagged upstream release." >&2
+            exit 1
+          elif [ "$REL" = "release not found" ]; then
+            echo "No existing release for $REF; proceeding."
+          else
+            echo "::error::gh release view failed for $REPO while checking $REF: $REL. Refusing to publish -- release state for $REF could not be determined, and proceeding could silently overwrite already-published :$VERSION/:latest image tags. Re-run once the GitHub API is healthy." >&2
+            exit 1
+          fi
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -594,25 +621,41 @@ ENTRYPOINT ["/rsgain"]
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push multi-arch image
+      - name: Build and push versioned image
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
         run: |
           set -euo pipefail
           IMAGE_LC="${IMAGE,,}"
+          # Only the version tag is pushed here. :latest is not touched until
+          # the smoke test below passes -- otherwise a failing smoke test
+          # would leave a possibly-broken image already public as :latest.
           docker buildx build --push \
             --platform linux/amd64,linux/arm64 \
-            -t "$IMAGE_LC:${{ needs.check.outputs.version }}" \
-            -t "$IMAGE_LC:latest" \
+            -t "$IMAGE_LC:$VERSION" \
             ctx
 
       - name: Smoke test the scratch image
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
         run: |
           set -euo pipefail
           IMAGE_LC="${IMAGE,,}"
           # This is the fifth verify.sh assertion, which cannot run inside the
           # build container: prove the binary runs with no userland at all.
-          out=$(docker run --rm "$IMAGE_LC:${{ needs.check.outputs.version }}" -v)
+          out=$(docker run --rm "$IMAGE_LC:$VERSION" -v)
           echo "$out"
           echo "$out" | grep -q "rsgain" || { echo "scratch image did not run"; exit 1; }
+
+      - name: Promote to latest
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          set -euo pipefail
+          IMAGE_LC="${IMAGE,,}"
+          # Re-points :latest at the already-smoke-tested :$VERSION manifest
+          # without rebuilding, so :latest only ever moves after verification.
+          docker buildx imagetools create -t "$IMAGE_LC:latest" "$IMAGE_LC:$VERSION"
 
       - name: Create release
         env:
@@ -622,8 +665,6 @@ ENTRYPOINT ["/rsgain"]
         run: |
           set -euo pipefail
           IMAGE_LC="${IMAGE,,}"
-          # Written to a file rather than inlined: YAML block indentation would
-          # otherwise leak into the rendered release notes.
           cat > notes.md <<EOF
           Actually-static build of upstream rsgain $REF.
 
@@ -632,7 +673,6 @@ ENTRYPOINT ["/rsgain"]
 
           Container image: \`$IMAGE_LC:$VERSION\`
           EOF
-          sed -i 's/^          //' notes.md
           gh release create "$REF" \
             artifacts/tarball-amd64/*.tar.xz \
             artifacts/tarball-arm64/*.tar.xz \
