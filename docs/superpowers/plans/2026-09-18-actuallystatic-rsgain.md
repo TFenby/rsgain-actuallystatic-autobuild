@@ -317,7 +317,8 @@ git push
 
 - [ ] **Step 1: Write the workflow**
 
-Create `.github/workflows/build.yml`:
+Create `.github/workflows/build.yml` (this is the shipped version, including the
+fail-closed `check` logic and env-passed inputs added during review):
 
 ```yaml
 name: Build
@@ -340,6 +341,10 @@ env:
   UPSTREAM: complexlogic/rsgain
   VCPKG_COMMITTISH: a1cae005c39be7b18ba319fced856b68d7276271
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   check:
     name: Check for new upstream release
@@ -352,9 +357,9 @@ jobs:
       - id: r
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_REF: ${{ github.event.inputs.ref }}
         run: |
           set -euo pipefail
-          INPUT_REF="${{ github.event.inputs.ref }}"
           if [ -n "$INPUT_REF" ]; then
             echo "Manual dispatch for $INPUT_REF; skipping the up-to-date check."
             echo "ref=$INPUT_REF"            >> "$GITHUB_OUTPUT"
@@ -363,7 +368,14 @@ jobs:
             exit 0
           fi
           UP=$(gh release view --repo "$UPSTREAM" --json tagName -q .tagName)
-          MINE=$(gh release view --repo "${{ github.repository }}" --json tagName -q .tagName 2>/dev/null || echo "")
+          if MINE=$(gh release view --repo "${{ github.repository }}" --json tagName -q .tagName 2>&1); then
+            : # MINE now holds the tag name
+          elif [ "$MINE" = "release not found" ]; then
+            MINE=""
+          else
+            echo "::error::gh release view failed for ${{ github.repository }}: $MINE" >&2
+            exit 1
+          fi
           echo "upstream=$UP ours=${MINE:-none}"
           echo "ref=$UP"         >> "$GITHUB_OUTPUT"
           echo "version=${UP#v}" >> "$GITHUB_OUTPUT"
@@ -447,9 +459,11 @@ jobs:
         run: ./verify.sh build/rsgain
 
       - name: Package
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
         run: |
           set -euo pipefail
-          V="${{ needs.check.outputs.version }}"
+          V="$VERSION"
           D="rsgain-$V-linux-${{ matrix.arch }}-static"
           mkdir -p "dist/$D/presets"
           cp build/rsgain "dist/$D/rsgain"
