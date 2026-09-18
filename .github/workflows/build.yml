@@ -187,11 +187,21 @@ jobs:
           VERSION: ${{ needs.check.outputs.version }}
         run: |
           set -euo pipefail
-          if gh release view "$REF" --repo "$REPO" >/dev/null 2>&1; then
+          # Same three-branch shape as the check job's own-release lookup:
+          # found / genuinely-not-found / anything-else-fails-loudly. A bare
+          # `if ... ; then block ; fi` would fail OPEN on a transient API
+          # error (5xx, rate limit, auth hiccup) -- treating "couldn't tell"
+          # the same as "confirmed absent" is exactly wrong for a guard whose
+          # job is to stop an overwrite.
+          if REL=$(gh release view "$REF" --repo "$REPO" --json tagName -q .tagName 2>&1); then
             echo "::error::Release $REF already exists on $REPO. Manual dispatch of an already-released ref is not supported: rebuilding now would push fresh (not bit-identical) image content over the published :$VERSION and :latest tags without any release changing to show for it. If you need to redo this version, remove the existing release and image tag first through your own deliberate action -- this workflow will not overwrite them for you. To publish a new version, dispatch with a ref that has no release yet, or leave ref blank to build the newest untagged upstream release." >&2
             exit 1
+          elif [ "$REL" = "release not found" ]; then
+            echo "No existing release for $REF; proceeding."
+          else
+            echo "::error::gh release view failed for $REPO while checking $REF: $REL. Refusing to publish -- release state for $REF could not be determined, and proceeding could silently overwrite already-published :$VERSION/:latest image tags. Re-run once the GitHub API is healthy." >&2
+            exit 1
           fi
-          echo "No existing release for $REF; proceeding."
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
