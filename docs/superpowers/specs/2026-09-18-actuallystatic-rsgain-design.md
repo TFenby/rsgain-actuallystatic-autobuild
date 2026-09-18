@@ -118,9 +118,15 @@ failure and is runnable locally:
 1. `readelf -d` reports zero `NEEDED` entries
 2. `readelf -l` reports no `INTERP` segment
 3. `file` reports `statically linked`, not `dynamically linked`
-4. the binary executes inside an empty `scratch` container
-5. functional smoke test: encode a 1-second flac with the builder's ffmpeg, run
+4. functional smoke test: encode a 1-second flac with the builder's ffmpeg, run
    `rsgain custom -s i` on it, assert `REPLAYGAIN_TRACK_GAIN` is read back
+
+The `build` job runs inside a `debian:trixie` container and so has no Docker
+daemon available. The fifth assertion — that the binary runs with no userland at
+all — therefore belongs to `publish`, which runs on the runner host: after
+`buildx` produces the `scratch` image, `publish` executes `docker run --rm
+<image> -v` and fails if it does not print a version. Together the two jobs cover
+the same ground the probe did.
 
 The fixture is **generated at build time**, not committed — ffmpeg is already
 present in the builder, and this keeps binary files out of the repo.
@@ -160,8 +166,10 @@ Every step fails hard and loudly. No partial releases, no fallbacks:
 - **arm64 is unverified.** The probe covered amd64 only. The upstream overlay
   ports and ffmpeg's build may need attention on `arm64-linux` (notably `nasm`,
   which is x86-only). First implementation step is to confirm an arm64 build
-  before wiring up the rest; if it proves troublesome, ship amd64 and add arm64
-  separately rather than blocking the release.
+  before wiring up the rest. If it proves troublesome, the response is to drop
+  arm64 from the matrix as a design decision and ship amd64 only — not to let a
+  failing leg through at runtime. The no-partial-release rule above is absolute:
+  whatever architectures are in the matrix must all pass.
 - **Static glibc caveats** (`getaddrinfo`/NSS, `dlopen`) do not apply — rsgain is
   a local file tagger and uses neither. Confirmed by the probe running cleanly in
   `scratch`.
