@@ -14,6 +14,10 @@ permissions:
   contents: write
   packages: write
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 env:
   UPSTREAM: complexlogic/rsgain
   VCPKG_COMMITTISH: a1cae005c39be7b18ba319fced856b68d7276271
@@ -35,6 +39,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_REF: ${{ github.event.inputs.ref }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           if [ -n "$INPUT_REF" ]; then
@@ -45,12 +50,12 @@ jobs:
             exit 0
           fi
           UP=$(gh release view --repo "$UPSTREAM" --json tagName -q .tagName)
-          if MINE=$(gh release view --repo "${{ github.repository }}" --json tagName -q .tagName 2>&1); then
+          if MINE=$(gh release view --repo "$REPO" --json tagName -q .tagName 2>&1); then
             : # MINE now holds the tag name
           elif [ "$MINE" = "release not found" ]; then
             MINE=""
           else
-            echo "::error::gh release view failed for ${{ github.repository }}: $MINE" >&2
+            echo "::error::gh release view failed for $REPO: $MINE" >&2
             exit 1
           fi
           echo "upstream=$UP ours=${MINE:-none}"
@@ -135,6 +140,9 @@ jobs:
       - name: Verify actually static
         run: ./verify.sh build/rsgain
 
+      - name: Verify the verifier rejects a dynamic binary
+        run: ./test_verify.sh build/rsgain
+
       - name: Package
         env:
           VERSION: ${{ needs.check.outputs.version }}
@@ -218,6 +226,18 @@ jobs:
           cp artifacts/presets/*.ini ctx/presets/
           chmod +x ctx/rsgain-amd64 ctx/rsgain-arm64
           ls -laR ctx
+
+          # The smoke test below only exercises the amd64 manifest entry (it
+          # runs on ubuntu-latest), but both arches get pushed and promoted
+          # to :latest. Assert directly that each staged binary is the
+          # architecture its filename claims, is actually static, and is
+          # executable -- a swapped cp or a lost exec bit must fail the
+          # build here, not ship silently. Fails closed: if `file` itself
+          # errors or is missing, `set -e` + `pipefail` take the step down.
+          command -v file >/dev/null || { echo "::error::file(1) is required to verify staged binaries" >&2; exit 1; }
+          file ctx/rsgain-amd64 | grep -q 'x86-64.*statically linked'  || { echo "::error::amd64 slot holds the wrong binary" >&2; exit 1; }
+          file ctx/rsgain-arm64 | grep -q 'aarch64.*statically linked' || { echo "::error::arm64 slot holds the wrong binary" >&2; exit 1; }
+          [ -x ctx/rsgain-amd64 ] && [ -x ctx/rsgain-arm64 ] || { echo "::error::staged binary is not executable" >&2; exit 1; }
 
       - name: Set up buildx
         uses: docker/setup-buildx-action@v3

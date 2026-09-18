@@ -42,16 +42,19 @@ docker run --rm -v /path/to/music:/music \
   ghcr.io/tfenby/rsgain-actuallystatic easy -p ebur128 /music
 ```
 
-The image is `FROM scratch` — about 9.2 MB (amd64) / 8.1 MB (arm64), no
-shell, no libc, nothing but the binary and its presets. Both architectures
-are built and published natively (no cross-compilation, no emulation). Or
-grab a tarball from [Releases](../../releases) and drop the binary anywhere
-on `$PATH`.
+The image is `FROM scratch` — about 6.6 MB (amd64) / 5.7 MB (arm64) on disk,
+~3 MB to pull, no shell, no libc, nothing but the binary and its presets.
+Both architectures are built and published natively (no cross-compilation,
+no emulation). Or grab a tarball from [Releases](../../releases) and drop
+the binary anywhere on `$PATH` — note that `-p <name>` preset lookup only
+works if the presets end up installed at `/usr/share/rsgain/presets` (as
+they are in the image); otherwise pass a preset by its full path instead of
+by name.
 
 ## How it's built
 
-Upstream's source, unmodified, built through vcpkg exactly as upstream's own
-CI does, plus one flag:
+Upstream's source, unmodified, built through vcpkg the same way upstream's
+own CI does, plus one flag:
 
 ```
 -DCMAKE_EXE_LINKER_FLAGS="-static"
