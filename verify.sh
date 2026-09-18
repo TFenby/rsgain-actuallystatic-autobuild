@@ -8,6 +8,9 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 [ -x "$BIN" ] || fail "$BIN is not an executable file"
 
+# Ensure readelf is available for staticness checks.
+command -v readelf >/dev/null || fail "readelf is required for the staticness check"
+
 # 1. No dynamic dependencies recorded.
 needed=$(readelf -d "$BIN" 2>/dev/null | grep -c 'NEEDED' || true)
 [ "$needed" -eq 0 ] || fail "$needed NEEDED entries; binary is dynamically linked"
@@ -28,8 +31,10 @@ file "$BIN" | grep -q 'statically linked' \
 #    proves the statically linked ffmpeg and TagLib are wired up, not just present.
 command -v ffmpeg >/dev/null || fail "ffmpeg is required for the functional check"
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-ffmpeg -loglevel error -f lavfi -i "sine=frequency=440:duration=1" -c:a flac "$tmp/t.flac"
-"$BIN" custom -s i "$tmp/t.flac" >/dev/null
+ffmpeg -loglevel error -f lavfi -i "sine=frequency=440:duration=1" -c:a flac "$tmp/t.flac" \
+  || fail "failed to generate test FLAC file"
+"$BIN" custom -s i "$tmp/t.flac" >/dev/null \
+  || fail "failed to tag test FLAC file with rsgain"
 ffmpeg -loglevel error -i "$tmp/t.flac" -f ffmetadata - | grep -q REPLAYGAIN_TRACK_GAIN \
   || fail "no REPLAYGAIN_TRACK_GAIN written; the static ffmpeg/TagLib path is broken"
 
