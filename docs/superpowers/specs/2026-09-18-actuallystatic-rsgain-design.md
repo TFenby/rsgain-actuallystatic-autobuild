@@ -20,7 +20,7 @@ libstdc++.so.6, libm.so.6, libgcc_s.so.1, libpthread.so.0, libc.so.6
 
 The job builds every *third-party dependency* as a `.a` through vcpkg, but never
 statically links the *toolchain*. The result is a binary that still requires a
-host glibc (>= 2.31, since the job pins `debian:bullseye`) and a matching
+host glibc (>= 2.30 by measurement, `readelf -V`; the job pins `debian:bullseye`) and a matching
 libstdc++. It cannot run in a `scratch` container, on musl systems, or on
 distributions older than the build host.
 
