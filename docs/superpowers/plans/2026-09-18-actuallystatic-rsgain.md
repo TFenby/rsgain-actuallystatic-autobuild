@@ -23,7 +23,8 @@
 - Presets must land at `/usr/share/rsgain/presets` in the image — that path is compiled into the binary via `CMAKE_INSTALL_PREFIX=/usr`.
 - Release tags mirror upstream verbatim (`v3.8`).
 - No partial releases: every architecture in the matrix must pass before anything publishes.
-- The repo must be **public** — free native `ubuntu-24.04-arm` runners require it.
+- The repo must stay **public** — free native `ubuntu-24.04-arm` runners require it. Already created and public; do not run `gh repo create`.
+- `TFenby/rsgain-static-autobuild` is already archived and is strictly out of scope. No task may modify it or its `ghcr.io/tfenby/rsgain` package.
 
 ---
 
@@ -173,13 +174,25 @@ The single unverified assumption in the design. Retire it on real hardware befor
 - Consumes: `verify.sh` from Task 1.
 - Produces: a yes/no answer on whether `arm64-linux` builds. That answer decides the Task 3 matrix.
 
-- [ ] **Step 1: Create the GitHub repo**
+- [ ] **Step 1: Confirm the repo is ready**
+
+The repo already exists and `origin` is already configured — do not create it.
+Just confirm the preconditions the arm64 probe depends on:
 
 ```bash
-gh repo create rsgain-actuallystatic-autobuild --public --source=. --remote=origin --push
+git remote -v                       # origin -> TFenby/rsgain-actuallystatic-autobuild
+gh repo view --json nameWithOwner,visibility -q '.nameWithOwner + " " + .visibility'
 ```
 
-Public is required — free native `ubuntu-24.04-arm` runners are not available to private repos.
+Expected: `TFenby/rsgain-actuallystatic-autobuild PUBLIC`. Public matters — free
+native `ubuntu-24.04-arm` runners are not available to private repos. If it ever
+reads `PRIVATE`, stop: the arm64 leg will queue forever rather than fail loudly.
+
+Push the work from Task 1 so the workflow has `verify.sh` to call:
+
+```bash
+git push -u origin master
+```
 
 - [ ] **Step 2: Write the probe workflow**
 
@@ -647,7 +660,7 @@ git push
 
 ---
 
-### Task 5: README and predecessor archival
+### Task 5: README
 
 **Files:**
 - Create: `README.md`
@@ -655,6 +668,10 @@ git push
 **Interfaces:**
 - Consumes: the published artifacts from Task 4.
 - Produces: nothing consumed by later tasks.
+
+**Out of scope:** `TFenby/rsgain-static-autobuild` is already archived. This plan
+must not touch that repo or its `ghcr.io/tfenby/rsgain` package in any way — no
+README edit, no archive call, no re-linking.
 
 - [ ] **Step 1: Write the README**
 
@@ -750,23 +767,7 @@ git commit -m "docs: add README"
 git push
 ```
 
-- [ ] **Step 4: Archive the predecessor**
-
-Add a pointer to the old repo before archiving it, so anyone landing there is sent here:
-
-```bash
-gh repo view TFenby/rsgain-static-autobuild
-# Edit its README to add, at the top:
-#   > **Superseded by [rsgain-actuallystatic-autobuild](https://github.com/TFenby/rsgain-actuallystatic-autobuild)**,
-#   > which builds genuinely static binaries instead of repackaging upstream's dynamic ones.
-gh repo archive TFenby/rsgain-static-autobuild --yes
-```
-
-The old `ghcr.io/tfenby/rsgain` package is left in place and simply stops
-receiving updates. Do not re-link it to this repo — that would silently change
-what existing `:latest` pullers receive.
-
-- [ ] **Step 5: Final end-to-end check**
+- [ ] **Step 4: Final end-to-end check**
 
 ```bash
 gh release list

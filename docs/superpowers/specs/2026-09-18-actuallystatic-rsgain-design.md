@@ -147,7 +147,7 @@ compare tags directly.
 
 ## Relationship to rsgain-static-autobuild
 
-`TFenby/rsgain-static-autobuild` is superseded by this project and will be
+`TFenby/rsgain-static-autobuild` is superseded by this project and has been
 archived. It repackaged upstream's dynamically linked binary into a distroless
 image; this project builds a genuinely static binary from source, which makes the
 older approach redundant.
@@ -157,10 +157,10 @@ from upstream's mislabelled `Static` build, and that distinction is the reason
 the project exists. Images publish to `ghcr.io/tfenby/rsgain-actuallystatic`,
 matching the repo name.
 
-The old `ghcr.io/tfenby/rsgain` package is left in place and stops receiving
-updates when the repo is archived. Its README should gain a line pointing here.
-Re-linking that package name to this repo is possible but would silently change
-what existing `:latest` pullers receive, so it is out of scope.
+The old `ghcr.io/tfenby/rsgain` package is left in place and no longer receives
+updates. Re-linking that package name to this repo is possible but would silently
+change what existing `:latest` pullers receive. The archived repo and its package
+are out of scope for implementation — nothing in this project touches them.
 
 ## Error handling
 
