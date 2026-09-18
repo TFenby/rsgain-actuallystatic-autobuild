@@ -1,0 +1,161 @@
+name: Build
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Upstream ref to build (tag or branch). Blank = latest upstream release."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  UPSTREAM: complexlogic/rsgain
+  VCPKG_COMMITTISH: a1cae005c39be7b18ba319fced856b68d7276271
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    name: Check for new upstream release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.r.outputs.version }}
+      ref: ${{ steps.r.outputs.ref }}
+      should_build: ${{ steps.r.outputs.should_build }}
+    steps:
+      - id: r
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          INPUT_REF="${{ github.event.inputs.ref }}"
+          if [ -n "$INPUT_REF" ]; then
+            echo "Manual dispatch for $INPUT_REF; skipping the up-to-date check."
+            echo "ref=$INPUT_REF"            >> "$GITHUB_OUTPUT"
+            echo "version=${INPUT_REF#v}"    >> "$GITHUB_OUTPUT"
+            echo "should_build=true"         >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          UP=$(gh release view --repo "$UPSTREAM" --json tagName -q .tagName)
+          MINE=$(gh release view --repo "${{ github.repository }}" --json tagName -q .tagName 2>/dev/null || echo "")
+          echo "upstream=$UP ours=${MINE:-none}"
+          echo "ref=$UP"         >> "$GITHUB_OUTPUT"
+          echo "version=${UP#v}" >> "$GITHUB_OUTPUT"
+          if [ "$UP" = "$MINE" ]; then
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_build=true"  >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build ${{ matrix.arch }}
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            triplet: x64-linux
+            extra_pkgs: nasm
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            triplet: arm64-linux
+            extra_pkgs: ""
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: debian:trixie
+    steps:
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          apt-get install -y -qq curl zip unzip tar build-essential git cmake \
+            pkg-config python3 binutils ca-certificates file ffmpeg xz-utils \
+            ${{ matrix.extra_pkgs }}
+
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Checkout upstream source
+        uses: actions/checkout@v4
+        with:
+          repository: complexlogic/rsgain
+          ref: ${{ needs.check.outputs.ref }}
+          path: upstream
+          fetch-depth: 0
+
+      - name: Checkout vcpkg overlay ports
+        uses: actions/checkout@v4
+        with:
+          repository: complexlogic/vcpkg
+          ref: rsgain
+          path: overlays
+
+      - name: Bootstrap vcpkg
+        run: |
+          set -euo pipefail
+          git clone https://github.com/microsoft/vcpkg /opt/vcpkg
+          git -C /opt/vcpkg checkout "$VCPKG_COMMITTISH"
+          /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Configure
+        run: |
+          set -euo pipefail
+          cmake -S upstream -B build \
+            -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
+            -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} \
+            -DVCPKG_MANIFEST_FEATURES="fmt;ffmpeg;libebur128;inih;" \
+            -DVCPKG_OVERLAY_PORTS=overlays/ports \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DPACKAGE=TXZ \
+            -DSTRIP_BINARY=ON \
+            -DCMAKE_EXE_LINKER_FLAGS="-static"
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Verify actually static
+        run: ./verify.sh build/rsgain
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          V="${{ needs.check.outputs.version }}"
+          D="rsgain-$V-linux-${{ matrix.arch }}-static"
+          mkdir -p "dist/$D/presets"
+          cp build/rsgain "dist/$D/rsgain"
+          cp upstream/config/presets/*.ini "dist/$D/presets/"
+          cp upstream/LICENSE "dist/$D/LICENSE"
+          cp upstream/README.md "dist/$D/README.md"
+          tar -C dist -cJf "$D.tar.xz" "$D"
+          ls -la "$D.tar.xz"
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: tarball-${{ matrix.arch }}
+          path: rsgain-*-linux-${{ matrix.arch }}-static.tar.xz
+
+      - name: Upload bare binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.arch }}
+          path: build/rsgain
+
+      - name: Upload presets
+        if: matrix.arch == 'amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: presets
+          path: upstream/config/presets/*.ini
