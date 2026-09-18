@@ -173,13 +173,21 @@ Every step fails hard and loudly. No partial releases, no fallbacks:
 
 ## Risks
 
-- **arm64 is unverified.** The probe covered amd64 only. The upstream overlay
-  ports and ffmpeg's build may need attention on `arm64-linux` (notably `nasm`,
-  which is x86-only). First implementation step is to confirm an arm64 build
-  before wiring up the rest. If it proves troublesome, the response is to drop
-  arm64 from the matrix as a design decision and ship amd64 only — not to let a
-  failing leg through at runtime. The no-partial-release rule above is absolute:
-  whatever architectures are in the matrix must all pass.
+- **arm64: verified.** Probed 2026-09-18 on a native `ubuntu-24.04-arm` runner
+  (`debian:trixie` container, `arm64-linux` triplet, same vcpkg pin and manifest
+  features as amd64, no `nasm`). vcpkg built `ffmpeg[avcodec,avformat,core,fdk-aac,nonfree,swresample]:arm64-linux@9.0.1#1`
+  from source (0 packages restored from cache) without needing `nasm` — the
+  x86-only-assembler risk called out below did not materialize. `verify.sh`
+  passed all five checks (0 NEEDED entries, no INTERP segment, `file(1)` reports
+  statically linked, binary executes, and the FLAC tag/read-back round trip
+  works), printing `PASS: build/rsgain is actually static and functional`.
+  Full run: https://github.com/TFenby/rsgain-actuallystatic-autobuild/actions/runs/35393097106
+  (job completed in 3m38s). The one linker warning seen — `ld: ... warning:
+  Using 'getaddrinfo' in statically linked applications requires at runtime the
+  shared libraries from the glibc version used for linking` — is expected static-glibc
+  boilerplate and did not affect the functional check below, consistent with the
+  next bullet (rsgain does no network I/O). Task 3's matrix includes both
+  amd64 and arm64.
 - **Static glibc caveats** (`getaddrinfo`/NSS, `dlopen`) do not apply — rsgain is
   a local file tagger and uses neither. Confirmed by the probe running cleanly in
   `scratch`.
