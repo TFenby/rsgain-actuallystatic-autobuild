@@ -45,7 +45,7 @@ A probe on 2026-09-18 built upstream v3.8 this way and confirmed:
 | Check | Upstream v3.8 | This build |
 |---|---|---|
 | `file` | `dynamically linked` | `statically linked` |
-| `NEEDED` entries | 5 | 0 |
+| `NEEDED` entries | 6 | 0 |
 | `INTERP` segment | present | none |
 | Runs in `FROM scratch` | no | yes |
 | Image size | 45 MB | 9.72 MB |

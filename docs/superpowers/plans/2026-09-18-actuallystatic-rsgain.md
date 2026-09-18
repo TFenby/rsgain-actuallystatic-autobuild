@@ -152,7 +152,9 @@ Also confirm it rejects upstream's mislabelled binary, which is the actual adver
 ```bash
 ./verify.sh /tmp/claude-1000/-home-tyler-src-rsgain-actuallystatic-autobuild/7528e9e1-2dc3-4f3e-a537-b5e48c5bea0d/scratchpad/rsgain-3.8-Linux/rsgain
 ```
-Expected: `FAIL: 5 NEEDED entries; binary is dynamically linked`, exit 1.
+Expected: `FAIL: 6 NEEDED entries; binary is dynamically linked`, exit 1. (Six, not five:
+on a PIE binary `ld-linux-x86-64.so.2` is itself a NEEDED entry alongside the five
+libraries.)
 
 - [ ] **Step 5: Commit**
 
