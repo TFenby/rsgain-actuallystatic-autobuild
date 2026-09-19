@@ -53,14 +53,29 @@ by name.
 
 ## How it's built
 
-Upstream's source, unmodified, built through vcpkg the same way upstream's
-own CI does, plus one flag:
+Upstream's source, unmodified, built through vcpkg with upstream's own
+manifest and overlay ports. The change that makes the binary static is one
+linker flag:
 
 ```
 -DCMAKE_EXE_LINKER_FLAGS="-static"
 ```
 
-No fork, no patches, no vendored dependencies. A daily job checks upstream
+No fork, no patches, no vendored dependencies. Every other configure
+argument matches upstream's `Static` job character-for-character, but the
+build is not identical to it, and the differences are worth stating plainly
+in a repo about accurate claims:
+
+| | upstream's `Static` job | here |
+|---|---|---|
+| base image | `debian:bullseye` (EOL, mirrors 404) | `debian:trixie` |
+| architectures | x86-64 only | amd64 + arm64 |
+| man page | `-DINSTALL_MANPAGE=OFF` | flag not passed |
+| packaging | CPack via `--target package` | tarball assembled directly |
+
+Since the binary is statically linked, the build image's glibc version has
+no bearing on where it runs — which is why moving off upstream's EOL
+`bullseye` pin costs nothing. A daily job checks upstream
 for a new release and builds amd64 and arm64 natively (separate native
 runners per architecture, not QEMU).
 
